@@ -32,16 +32,23 @@ function parseADSIS(html, turma = 'ADSIS4S-N-B') {
   const $ = cheerio.load(html);
   const results = [];
 
-  $('table.tableReserva').each((_, table) => {
-    const lab = $(table).find('tr').first().text().trim();
-    const reservas = $(table).find('div.reserva');
+  $('table.bloco').each((_, blocoTable) => {
+    const bloco = $(blocoTable).find('th').first().text().trim();
 
-    reservas.each((idx, r) => {
-      const text = $(r).text().trim().toUpperCase();
-      if (text.includes(turma.toUpperCase())) {
-        const horario = idx === 0 ? '1º Horário' : '2º Horário';
-        results.push(`${horario} · ${lab} · ${$(r).text().trim()}`);
-      }
+    $(blocoTable).find('table.tableReserva').each((_, table) => {
+      const lab = $(table).find('tr').first().text().trim();
+      const reservas = $(table).find('div.reserva');
+
+      reservas.each((idx, r) => {
+        const text = $(r).text().trim().toUpperCase();
+        if (text.includes(turma.toUpperCase())) {
+          const horario = idx === 0 ? '1º Horário' : '2º Horário';
+
+          const professor = $(r).html().split('<br>')[0].trim();
+
+          results.push(`${bloco} · ${horario} · ${lab} · ${professor}`);
+        }
+      });
     });
   });
 
