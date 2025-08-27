@@ -28,9 +28,23 @@ async function fetchSchedule(dateStr) {
   return data;
 }
 
-function parseADSIS(html, turma = 'ADSIS4S-N-B') {
+function weekdayNamePt(dateStr) {
+  const idx = dayjs.tz(dateStr, TZ).day();
+  return ['DOMINGO','SEGUNDA','TERÇA','QUARTA','QUINTA','SEXTA','SÁBADO'][idx];
+}
+
+function parseADSIS(html, turma = 'ADSIS4S-N-B', dateStr) {
   const $ = cheerio.load(html);
   const results = [];
+
+  const RULES = [
+    { re: /ELIEL\s+NASCIMENTO/i, allows: [{ day: 'SEGUNDA', slot: '1' }, { day: 'QUINTA', slot: '2' }] },
+    { re: /JO(ÃO|AO)\s+CHOMA/i,  allows: [{ day: 'QUARTA',  slot: '1' }, { day: 'QUINTA', slot: '1' }] },
+    { re: /JO(ÃO|AO)\s+BIAZOTTO/i,allows: [{ day: 'SEGUNDA', slot: '2' }, { day: 'TERÇA',  slot: '2' }] },
+    { re: /CARLOS\s+LUZ/i,       allows: [{ day: 'TERÇA',   slot: '1' }, { day: 'QUARTA', slot: '2' }] },
+  ];
+
+  const diaSemana = weekdayNamePt(dateStr);
 
   $('table.bloco').each((_, blocoTable) => {
     const bloco = $(blocoTable).find('th').first().text().trim();
@@ -40,13 +54,26 @@ function parseADSIS(html, turma = 'ADSIS4S-N-B') {
       const reservas = $(table).find('div.reserva');
 
       reservas.each((idx, r) => {
-        const text = $(r).text().trim().toUpperCase();
-        if (text.includes(turma.toUpperCase())) {
-          const horario = idx === 0 ? '1º Horário' : '2º Horário';
+        const slotNumero = idx === 0 ? '1' : '2';
+        const horarioLabel = slotNumero === '1' ? '1º Horário' : '2º Horário';
 
-          const professor = $(r).html().split('<br>')[0].trim();
+        const firstLineHtml = (($(r).html() || '').split('<br>')[0] || '');
+        const professor = firstLineHtml.replace(/<[^>]+>/g, '').trim();
+        const professorUpper = professor.toUpperCase();
 
-          results.push(`${bloco} · ${horario} · ${lab} · ${professor}`);
+        const textUpper = $(r).text().trim().toUpperCase();
+
+        const isTurmaInLab =
+          textUpper.includes(turma.toUpperCase()) &&
+          /LAB/.test(lab.toUpperCase());
+
+        const bateRegraProf = RULES.some(rule =>
+          rule.re.test(professorUpper) &&
+          rule.allows.some(a => a.day === diaSemana && a.slot === slotNumero)
+        );
+
+        if (isTurmaInLab || bateRegraProf) {
+          results.push(`${bloco} · ${horarioLabel} · ${lab} · ${professor}`);
         }
       });
     });
@@ -54,6 +81,8 @@ function parseADSIS(html, turma = 'ADSIS4S-N-B') {
 
   return results;
 }
+
+
 
 async function sendTelegramMessage(text) {
   const url = `https://api.telegram.org/bot${TOKEN}/sendMessage`;
@@ -67,16 +96,21 @@ async function sendTelegramMessage(text) {
 async function jobRun() {
   const dateStr = todayStr();
   const html = await fetchSchedule(dateStr);
-  const matches = parseADSIS(html, 'ADSIS4S-N-B');
+  const matches = parseADSIS(html, 'ADSIS4S-N-B', dateStr);
+
+  const sorted = matches.sort((a, b) => {
+    const getSlot = (s) => (s.includes('1º Horário') ? 1 : 2);
+    return getSlot(a) - getSlot(b);
+  });
 
   let msg = `📅 *${dateStr}* · Turno Noite\n📚 Turma ADSIS4S-N-B\n\n`;
-  msg += matches.length
-    ? matches.map(m => `• ${m}`).join('\n')
+  msg += sorted.length
+    ? sorted.map(m => `• ${m}`).join('\n')
     : 'Nenhuma aula encontrada hoje.';
 
   await sendTelegramMessage(msg);
-  console.log(msg);
 }
+
 
 if (process.argv.includes('--now')) {
   jobRun();
